@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <title>Magic Christmas Mobile</title>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"
+      crossorigin="anonymous"
+    ></script>
+
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #050505;
+        font-family: "Segoe UI", sans-serif;
+        touch-action: none;
+      }
+      #canvas-container {
+        width: 100%;
+        height: 100vh;
+        display: block;
+      }
+
+      #ui-layer {
+        position: absolute;
+        bottom: 30px;
+        width: 100%;
+        text-align: center;
+        pointer-events: none;
+        z-index: 100;
+      }
+
+      .guide {
+        color: rgba(255, 255, 255, 0.9);
+        font-size: 12px;
+        letter-spacing: 0.5px;
+        margin-bottom: 20px;
+        text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+        background: rgba(0, 0, 0, 0.6);
+        display: inline-block;
+        padding: 10px 20px;
+        border-radius: 30px;
+        backdrop-filter: blur(5px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        max-width: 90%;
+      }
+
+      button {
+        pointer-events: auto;
+        cursor: pointer;
+        background: linear-gradient(135deg, #1a472a, #2e8b57);
+        color: #fff;
+        border: 2px solid #ffd700;
+        padding: 12px 40px;
+        border-radius: 50px;
+        font-weight: 700;
+        font-size: 16px;
+        text-transform: uppercase;
+        box-shadow: 0 0 40px rgba(46, 139, 87, 0.6);
+        transition: transform 0.2s;
+        -webkit-tap-highlight-color: transparent;
+      }
+      button:active {
+        transform: scale(0.95);
+      }
+
+      #camera-preview {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        width: 100px;
+        height: 75px; /* Nhỏ hơn trên mobile */
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        transform: scaleX(-1);
+        opacity: 0.6;
+        border-radius: 8px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        pointer-events: none;
+      }
+
+      #copyright {
+        position: absolute;
+        bottom: 5px;
+        right: 10px;
+        color: rgba(255, 255, 255, 0.3);
+        font-size: 10px;
+        z-index: 100;
+        font-style: italic;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="ui-layer">
+      <div class="guide">
+        ✨ Move Hand / Touch Screen to play ✨<br />
+        🖐 <b>Open:</b> Galaxy | 🫶 <b>Heart:</b> Love | ✊ <b>Fist:</b> Tree
+      </div>
+      <br />
+      <button id="btnStart" onclick="startSystem()">🎄 START 🎄</button>
+    </div>
+    <div id="copyright">Magic Christmas - Mobile Optimized</div>
+
+    <div id="canvas-container"></div>
+    <video class="input_video" playsinline style="display: none"></video>
+    <canvas id="camera-preview"></canvas>
+
+    <script>
+      // ==========================================
+      // 1. CONFIG & OPTIMIZATION
+      // ==========================================
+      // Kiểm tra xem có phải mobile không
+      const isMobile =
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+          navigator.userAgent
+        );
+
+      // Tối ưu số lượng hạt dựa trên thiết bị
+      const COUNT = isMobile ? 1200 : 3000; // Mobile giảm hạt xuống
+      const SNOW_COUNT = isMobile ? 200 : 600; // Giảm tuyết
+      const TRAIL_COUNT = isMobile ? 20 : 50; // Giảm vệt sáng
+
+      const MUSIC_URL = "./audio.mp3";
+      const photoFiles = [
+        "./image1.jpg",
+        "./image2.jpg",
+        "./image3.jpg",
+        "./image4.png",
+        "./image5.jpg",
+      ];
+
+      let bgMusic = new Audio(MUSIC_URL);
+      bgMusic.loop = true;
+      bgMusic.volume = 0.1;
+
+      const loader = new THREE.TextureLoader();
+      const photoTextures = photoFiles.map((f) => loader.load(f));
+
+      function createCustomTexture(type) {
+        const canvas = document.createElement("canvas");
+        // Giảm độ phân giải texture trên mobile để nhẹ RAM
+        const size = isMobile ? 32 : 64;
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        const cx = size / 2,
+          cy = size / 2;
+        const r = size / 2 - 2;
+
+        if (type === "snow") {
+          const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+          grd.addColorStop(0, "rgba(255,255,255,1)");
+          grd.addColorStop(1, "rgba(255,255,255,0)");
+          ctx.fillStyle = grd;
+          ctx.fillRect(0, 0, size, size);
+        } else if (type === "glow") {
+          const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+          grd.addColorStop(0, "#FFFFFF");
+          grd.addColorStop(0.2, "#FFD700");
+          grd.addColorStop(1, "rgba(0,0,0,0)");
+          ctx.fillStyle = grd;
+          ctx.fillRect(0, 0, size, size);
+        }
+        return new THREE.CanvasTexture(canvas);
+      }
+
+      // ==========================================
+      // 2. MAIN 3D SCENE
+      // ==========================================
+      let scene, camera, renderer;
+      let groupMain, groupSnow, groupGifts;
+      let photoMeshes = [];
+      let titleMesh, loveMesh, starMesh;
+      let trailSystem;
+
+      let state = "TREE";
+      let handX = 0.5,
+        handY = 0.5;
+
+      function init3D() {
+        const container = document.getElementById("canvas-container");
+        scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050505, 0.002);
+
+        camera = new THREE.PerspectiveCamera(
+          60,
+          window.innerWidth / window.innerHeight,
+          0.1,
+          1000
+        );
+        camera.position.z = isMobile ? 150 : 120; // Zoom out xíu trên mobile vì màn hình dọc
+
+        renderer = new THREE.WebGLRenderer({
+          antialias: !isMobile,
+          alpha: true,
+        }); // Tắt antialias trên mobile cho mượt
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        // Quan trọng: Giới hạn pixel ratio. iPhone có thể lên tới 3 hoặc 4, rất lag. Giới hạn 1.5 là đẹp.
+        renderer.setPixelRatio(
+          Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2)
+        );
+        container.appendChild(renderer.domElement);
+
+        groupMain = createSmartParticles();
+        groupSnow = createSnow();
+        groupGifts = createFloatingGifts();
+        trailSystem = createMagicTrail();
+
+        createPhotos();
+        createTexts();
+        createStar();
+
+        animate();
+      }
+
+      function createFloatingGifts() {
+        const group = new THREE.Group();
+        const geometry = new THREE.BoxGeometry(6, 6, 6);
+        for (let i = 0; i < 6; i++) {
+          const color = new THREE.Color().setHSL(Math.random(), 1.0, 0.6);
+          const material = new THREE.MeshPhongMaterial({
+            color: color,
+            shininess: 50,
+          });
+          const cube = new THREE.Mesh(geometry, material);
+
+          const angle = (i / 6) * Math.PI * 2;
+          const radius = 35;
+          cube.position.set(
+            Math.cos(angle) * radius,
+            -40,
+            Math.sin(angle) * radius
+          );
+          cube.userData = {
+            angle: angle,
+            speed: 0.01 + Math.random() * 0.01,
+            yOffset: Math.random() * 100,
+          };
+          group.add(cube);
+        }
+        const light = new THREE.PointLight(0xffffff, 1, 100);
+        light.position.set(0, 0, 50);
+        group.add(light);
+        scene.add(group);
+        return group;
+      }
+
+      function createMagicTrail() {
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(TRAIL_COUNT * 3);
+        const sizes = new Float32Array(TRAIL_COUNT);
+
+        for (let i = 0; i < TRAIL_COUNT; i++) {
+          positions[i * 3] = 0;
+          positions[i * 3 + 1] = 0;
+          positions[i * 3 + 2] = 0;
+          sizes[i] = 0;
+        }
+
+        geometry.setAttribute(
+          "position",
+          new THREE.BufferAttribute(positions, 3)
+        );
+        geometry.setAttribute("size", new THREE.BufferAttribute(sizes, 1));
+
+        const material = new THREE.PointsMaterial({
+          color: 0x88ccff,
+          size: 2,
+          map: createCustomTexture("glow"),
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        });
+
+        const points = new THREE.Points(geometry, material);
+        scene.add(points);
+        return { mesh: points, currentIdx: 0 };
+      }
+
+      function updateTrail(targetPos) {
+        const positions = trailSystem.mesh.geometry.attributes.position.array;
+        const sizes = trailSystem.mesh.geometry.attributes.size.array;
+
+        const idx = trailSystem.currentIdx;
+        positions[idx * 3] = targetPos.x;
+        positions[idx * 3 + 1] = targetPos.y;
+        positions[idx * 3 + 2] = targetPos.z;
+        sizes[idx] = 5.0;
+
+        trailSystem.currentIdx = (trailSystem.currentIdx + 1) % TRAIL_COUNT;
+
+        for (let i = 0; i < TRAIL_COUNT; i++) {
+          sizes[i] *= 0.9;
+        }
+
+        trailSystem.mesh.geometry.attributes.position.needsUpdate = true;
+        trailSystem.mesh.geometry.attributes.size.needsUpdate = true;
+      }
+
+      function createStar() {
+        const canvas = document.createElement("canvas");
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#FFFF00";
+        ctx.beginPath();
+        ctx.arc(32, 32, 20, 0, Math.PI * 2); // Vẽ tròn cho đơn giản và nhanh trên mobile
+        ctx.fill();
+        const tex = new THREE.CanvasTexture(canvas);
+        const mat = new THREE.MeshBasicMaterial({
+          map: tex,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+        });
+        starMesh = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), mat);
+        starMesh.position.set(0, 45, 0);
+        scene.add(starMesh);
+      }
+
+      function createSmartParticles() {
+        const geometry = new THREE.BufferGeometry();
+        const positions = [];
+        const targetTree = [];
+        const targetHeart = [];
+        const targetExplode = [];
+        const colors = [];
+        const sizes = [];
+        const randomness = [];
+
+        const color1 = new THREE.Color(0xffd700);
+        const color2 = new THREE.Color(0xff0000);
+
+        for (let i = 0; i < COUNT; i++) {
+          positions.push(
+            (Math.random() - 0.5) * 200,
+            (Math.random() - 0.5) * 200,
+            (Math.random() - 0.5) * 200
+          );
+
+          // TREE
+          const h = Math.random() * 80;
+          const y = h - 40;
+          const r = (1 - h / 80) * 35 * Math.sqrt(Math.random());
+          const theta = Math.random() * Math.PI * 2;
+          targetTree.push(r * Math.cos(theta), y, r * Math.sin(theta));
+
+          // HEART
+          const t = Math.random() * Math.PI * 2;
+          let hx = 16 * Math.pow(Math.sin(t), 3);
+          let hy =
+            13 * Math.cos(t) -
+            5 * Math.cos(2 * t) -
+            2 * Math.cos(3 * t) -
+            Math.cos(4 * t);
+          targetHeart.push(hx * 2.5, hy * 2.5 + 5, (Math.random() - 0.5) * 10);
+
+          // EXPLODE
+          const angle = Math.random() * Math.PI * 2;
+          const radius = 20 + Math.random() * 80;
+          targetExplode.push(
+            Math.cos(angle) * radius,
+            (Math.random() - 0.5) * 10,
+            Math.sin(angle) * radius
+          );
+
+          const mix = Math.random();
+          const c =
+            mix > 0.8 ? color2 : mix > 0.3 ? color1 : new THREE.Color(0xffffff);
+          colors.push(c.r, c.g, c.b);
+          sizes.push(Math.random() * 2 + 0.5);
+          randomness.push(Math.random(), Math.random(), Math.random());
+        }
+
+        geometry.setAttribute(
+          "position",
+          new THREE.Float32BufferAttribute(positions, 3)
+        );
+        geometry.setAttribute(
+          "color",
+          new THREE.Float32BufferAttribute(colors, 3)
+        );
+        geometry.setAttribute(
+          "size",
+          new THREE.Float32BufferAttribute(sizes, 1)
+        );
+        geometry.userData = {
+          tree: targetTree,
+          heart: targetHeart,
+          explode: targetExplode,
+          rand: randomness,
+        };
+
+        const material = new THREE.PointsMaterial({
+          size: 1.5,
+          vertexColors: true,
+          map: createCustomTexture("glow"),
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          transparent: true,
+          opacity: 0.9,
+        });
+
+        scene.add(new THREE.Points(geometry, material));
+        return new THREE.Points(geometry, material);
+      }
+
+      function createSnow() {
+        const geo = new THREE.BufferGeometry();
+        const pos = [];
+        const vel = [];
+        for (let i = 0; i < SNOW_COUNT; i++) {
+          pos.push(
+            (Math.random() - 0.5) * 300,
+            Math.random() * 200 - 100,
+            (Math.random() - 0.5) * 300
+          );
+          vel.push(Math.random() * 0.2 + 0.1);
+        }
+        geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+        geo.userData = { velocities: vel };
+        const mat = new THREE.PointsMaterial({
+          color: 0xffffff,
+          size: 1.2,
+          map: createCustomTexture("snow"),
+          transparent: true,
+          opacity: 0.6,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        });
+        const mesh = new THREE.Points(geo, mat);
+        scene.add(mesh);
+        return mesh;
+      }
+
+      function createTexts() {
+        const makeText = (text, color, font) => {
+          const cvs = document.createElement("canvas");
+          cvs.width = 512;
+          cvs.height = 128; // Giảm phân giải canvas text
+          const ctx = cvs.getContext("2d");
+          ctx.font = font;
+          ctx.fillStyle = color;
+          ctx.textAlign = "center";
+          ctx.fillText(text, 256, 80);
+          return new THREE.CanvasTexture(cvs);
+        };
+
+        const matTitle = new THREE.SpriteMaterial({
+          map: makeText(
+            "MERRY CHRISTMAS",
+            "#FFD700",
+            'bold italic 50px "Times New Roman"'
+          ),
+          transparent: true,
+        });
+        titleMesh = new THREE.Sprite(matTitle);
+        titleMesh.scale.set(60, 15, 1);
+        titleMesh.position.y = 60;
+        scene.add(titleMesh);
+
+        const matLove = new THREE.SpriteMaterial({
+          map: makeText("I LOVE YOU ❤️", "#FF69B4", 'bold 55px "Segoe UI"'),
+          transparent: true,
+        });
+        loveMesh = new THREE.Sprite(matLove);
+        loveMesh.scale.set(70, 18, 1);
+        loveMesh.position.y = -10;
+        loveMesh.visible = false;
+        scene.add(loveMesh);
+      }
+
+      function createPhotos() {
+        const geo = new THREE.PlaneGeometry(1, 1);
+        photoFiles.forEach((_, i) => {
+          const mat = new THREE.MeshBasicMaterial({
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0,
+          });
+          const mesh = new THREE.Mesh(geo, mat);
+          scene.add(mesh);
+          photoMeshes.push(mesh);
+        });
+      }
+
+      function animate() {
+        requestAnimationFrame(animate);
+        const time = Date.now() * 0.001;
+
+        // 1. Gift Animation
+        if (state === "TREE") {
+          groupGifts.visible = true;
+          groupGifts.children.forEach((cube) => {
+            if (cube.isMesh) {
+              cube.rotation.y += 0.01;
+              cube.position.y =
+                -40 + Math.sin(time * 2 + cube.userData.yOffset) * 2;
+              cube.userData.angle += cube.userData.speed;
+              const r = 35;
+              cube.position.x = Math.cos(cube.userData.angle) * r;
+              cube.position.z = Math.sin(cube.userData.angle) * r;
+            }
+          });
+        } else {
+          groupGifts.visible = false;
+        }
+
+        // 2. Trail
+        const vec = new THREE.Vector3(
+          (handX - 0.5) * 120,
+          -(handY - 0.5) * 100,
+          20
+        );
+        updateTrail(vec);
+
+        // 3. Particles (Optimized)
+        const positions = groupMain.geometry.attributes.position.array;
+        const rand = groupMain.geometry.userData.rand;
+
+        let targetArr;
+        if (state === "HEART") targetArr = groupMain.geometry.userData.heart;
+        else if (state === "TREE") targetArr = groupMain.geometry.userData.tree;
+        else targetArr = groupMain.geometry.userData.explode;
+
+        for (let i = 0; i < COUNT; i++) {
+          const ix = i * 3,
+            iy = i * 3 + 1,
+            iz = i * 3 + 2;
+
+          // Giảm bớt phép tính lượng giác trên mobile
+          let tx = targetArr[ix];
+          let ty = targetArr[iy];
+          let tz = targetArr[iz];
+
+          // Chỉ làm hiệu ứng drift nhẹ
+          tx += Math.sin(time + rand[ix] * 10) * 0.5;
+
+          positions[ix] += (tx - positions[ix]) * 0.05;
+          positions[iy] += (ty - positions[iy]) * 0.05;
+          positions[iz] += (tz - positions[iz]) * 0.05;
+        }
+        groupMain.geometry.attributes.position.needsUpdate = true;
+
+        // 4. State Rotation
+        if (state === "TREE") {
+          groupMain.rotation.y = time * 0.1;
+          titleMesh.visible = true;
+          loveMesh.visible = false;
+          starMesh.visible = true;
+          const s = 1 + Math.sin(time * 3) * 0.1;
+          starMesh.scale.set(s, s, 1);
+        } else if (state === "HEART") {
+          groupMain.rotation.y = 0;
+          const hb = 1 + Math.sin(time * 6) * 0.05;
+          groupMain.scale.set(hb, hb, hb);
+          titleMesh.visible = false;
+          loveMesh.visible = true;
+          starMesh.visible = false;
+        } else {
+          groupMain.rotation.y = time * 0.5;
+          groupMain.scale.set(1, 1, 1);
+          titleMesh.visible = false;
+          loveMesh.visible = false;
+          starMesh.visible = false;
+        }
+
+        // 5. Photos
+        photoMeshes.forEach((mesh, i) => {
+          if (!mesh.material.map && photoTextures[i].image) {
+            mesh.material.map = photoTextures[i];
+            mesh.material.needsUpdate = true;
+          }
+          if (state === "EXPLODE") {
+            mesh.material.opacity += (1 - mesh.material.opacity) * 0.05;
+            const angle = i * ((Math.PI * 2) / 5) + time * 0.3;
+            mesh.position.set(
+              Math.sin(angle) * 50,
+              Math.cos(angle) * 10,
+              Math.cos(angle) * 50
+            );
+            mesh.scale.setScalar(10);
+            mesh.lookAt(camera.position);
+          } else {
+            mesh.material.opacity += (0 - mesh.material.opacity) * 0.1;
+          }
+        });
+
+        // 6. Snow
+        const snowPos = groupSnow.geometry.attributes.position.array;
+        const snowVel = groupSnow.geometry.userData.velocities;
+        for (let i = 0; i < SNOW_COUNT; i++) {
+          snowPos[i * 3 + 1] -= snowVel[i];
+          if (snowPos[i * 3 + 1] < -100) {
+            snowPos[i * 3 + 1] = 100;
+            snowPos[i * 3] = (Math.random() - 0.5) * 300;
+          }
+        }
+        groupSnow.geometry.attributes.position.needsUpdate = true;
+
+        // 7. Camera Parallax
+        const targetCamX = (handX - 0.5) * 60;
+        const targetCamY = -(handY - 0.5) * 60;
+        camera.position.x += (targetCamX - camera.position.x) * 0.05;
+        camera.position.y += (targetCamY - camera.position.y) * 0.05;
+        camera.lookAt(0, 0, 0);
+
+        renderer.render(scene, camera);
+      }
+
+      function startSystem() {
+        document.getElementById("btnStart").style.display = "none";
+        bgMusic
+          .play()
+          .then(() => {
+            console.log("Audio playing");
+          })
+          .catch((e) => {
+            console.log("Audio autoplay prevented. Touch screen to play.");
+            document.body.addEventListener("click", () => bgMusic.play(), {
+              once: true,
+            });
+          });
+
+        init3D();
+
+        // Nếu người dùng từ chối Camera hoặc lỗi, vẫn cho chạy bằng cảm ứng
+        setupCamera();
+      }
+
+      function setupCamera() {
+        const video = document.getElementsByClassName("input_video")[0];
+        const canvas = document.getElementById("camera-preview");
+        const ctx = canvas.getContext("2d");
+
+        const hands = new Hands({
+          locateFile: (file) =>
+            `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+        });
+
+        // OPTIMIZATION: Dùng model nhẹ cho mobile (0) và nặng cho PC (1)
+        hands.setOptions({
+          maxNumHands: 2,
+          modelComplexity: isMobile ? 0 : 1, // 0 is Lite, 1 is Full. Rất quan trọng!
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+        });
+
+        hands.onResults((results) => {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+          let isHeartFound = false;
+
+          if (results.multiHandLandmarks.length === 2) {
+            const lm1 = results.multiHandLandmarks[0];
+            const lm2 = results.multiHandLandmarks[1];
+            const distIndex = Math.hypot(
+              lm1[8].x - lm2[8].x,
+              lm1[8].y - lm2[8].y
+            );
+            const distThumb = Math.hypot(
+              lm1[4].x - lm2[4].x,
+              lm1[4].y - lm2[4].y
+            );
+
+            if (distIndex < 0.15 && distThumb < 0.15) {
+              state = "HEART";
+              isHeartFound = true;
+              handX = (lm1[9].x + lm2[9].x) / 2;
+              handY = (lm1[9].y + lm2[9].y) / 2;
+            }
+          }
+
+          if (!isHeartFound && results.multiHandLandmarks.length > 0) {
+            const lm = results.multiHandLandmarks[0];
+            handX = lm[9].x;
+            handY = lm[9].y;
+            const tips = [8, 12, 16, 20];
+            const wrist = lm[0];
+            let openDist = 0;
+            tips.forEach(
+              (i) =>
+                (openDist += Math.hypot(lm[i].x - wrist.x, lm[i].y - wrist.y))
+            );
+            const avg = openDist / 4;
+            if (avg < 0.25) state = "TREE";
+            else state = "EXPLODE";
+          }
+        });
+
+        const cameraUtils = new Camera(video, {
+          onFrame: async () => {
+            await hands.send({ image: video });
+          },
+          width: isMobile ? 320 : 640, // Giảm phân giải camera input trên mobile
+          height: isMobile ? 240 : 480,
+        });
+
+        cameraUtils.start().catch((err) => {
+          console.log("Camera denied or error. Switching to Touch mode.");
+          document.querySelector(".guide").innerHTML =
+            "✨ Tap & Drag Screen to interact ✨";
+        });
+      }
+
+      // --- Touch Fallback & Parallax ---
+      window.addEventListener("resize", () => {
+        if (camera) {
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+      });
+
+      // Hỗ trợ cả chuột và chạm cảm ứng nếu không dùng camera
+      const onInteract = (x, y) => {
+        handX = x / window.innerWidth;
+        handY = y / window.innerHeight;
+      };
+
+      window.addEventListener("mousemove", (e) =>
+        onInteract(e.clientX, e.clientY)
+      );
+      window.addEventListener(
+        "touchmove",
+        (e) => {
+          onInteract(e.touches[0].clientX, e.touches[0].clientY);
+          e.preventDefault(); // Ngăn cuộn trang
+        },
+        { passive: false }
+      );
+
+      // Click đổi hiệu ứng (cho ai không bật cam)
+      window.addEventListener("click", () => {
+        if (state === "TREE") state = "EXPLODE";
+        else if (state === "EXPLODE") state = "HEART";
+        else state = "TREE";
+      });
+    </script>
+  </body>
+</html>
